@@ -216,23 +216,22 @@ if [ -n "$usage_token" ]; then
     i=0; while [ "$i" -lt "$filled" ]; do bar="${bar}▪"; i=$((i+1)); done
     i=0; while [ "$i" -lt "$empty" ];  do bar="${bar}·"; i=$((i+1)); done
 
-    # Format reset time as relative (e.g., "1h 30m / 5h")
+    # Format reset time as relative + absolute local time
     reset_str=""
     if [ -n "$usage_reset" ]; then
-      reset_epoch=$(date -jf "%Y-%m-%dT%H:%M:%S" "${usage_reset%%.*}" +%s 2>/dev/null)
-      if [ -z "$reset_epoch" ]; then
-        reset_epoch=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "${usage_reset%%.*}Z" +%s 2>/dev/null)
-      fi
+      reset_epoch=$(TZ=UTC date -jf "%Y-%m-%dT%H:%M:%S" "${usage_reset%%.*}" +%s 2>/dev/null)
       if [ -n "$reset_epoch" ]; then
         now_ts=$(date +%s)
         remain=$(( reset_epoch - now_ts ))
+        # Absolute reset time in local timezone (e.g., "4:05pm HKT")
+        reset_clock=$(date -jf "%s" "$reset_epoch" "+%-I:%M%p %Z" 2>/dev/null | sed 's/AM/am/;s/PM/pm/')
         if [ "$remain" -gt 0 ]; then
           rh=$(( remain / 3600 ))
           rm=$(( (remain % 3600) / 60 ))
           if [ "$rh" -gt 0 ]; then
-            reset_str=" (${rh}h ${rm}m / 5h)"
+            reset_str=" (${rh}h ${rm}m · resets ${reset_clock})"
           else
-            reset_str=" (${rm}m / 5h)"
+            reset_str=" (${rm}m · resets ${reset_clock})"
           fi
         fi
       fi

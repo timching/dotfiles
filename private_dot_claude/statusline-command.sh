@@ -115,8 +115,10 @@ if [ -n "$agent_name" ]; then
   seg "$FG_YELLOW" "⬡ ${agent_name}"
 fi
 
-# --- SESSION segment (rightmost) — name · id · duration ---
+# ============== LINE 2 ==============
+printf "\n"
 
+# --- SESSION segment — name · id · duration ---
 # Duration from transcript birth/mtime
 duration_str=""
 if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
@@ -148,5 +150,94 @@ if [ -n "$duration_str" ] || [ -n "$session_id" ]; then
   if [ -n "$duration_str" ]; then
     printf " · ${duration_str}"
   fi
-  printf "${RESET}"
+  printf "${RESET}${SEP}"
+fi
+
+# --- USAGE QUOTA segment (Pro/Max only, cached 5min) ---
+USAGE_CACHE="$HOME/.claude/.usage-cache.json"
+USAGE_TTL=300  # 5 minutes
+
+# Try to get OAuth token from macOS Keychain
+usage_token=""
+usage_pct=""
+usage_reset=""
+keychain_json=$(/usr/bin/security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null)
+if [ -n "$keychain_json" ]; then
+  usage_token=$(echo "$keychain_json" | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null)
+fi
+
+if [ -n "$usage_token" ]; then
+  # Check cache freshness
+  need_fetch=1
+  if [ -f "$USAGE_CACHE" ]; then
+    cache_ts=$(jq -r '.timestamp // 0' "$USAGE_CACHE" 2>/dev/null)
+    now_ts=$(date +%s)
+    age=$(( now_ts - cache_ts ))
+    if [ "$age" -lt "$USAGE_TTL" ]; then
+      need_fetch=0
+      usage_pct=$(jq -r '.five_hour // empty' "$USAGE_CACHE" 2>/dev/null)
+      usage_reset=$(jq -r '.five_hour_reset // empty' "$USAGE_CACHE" 2>/dev/null)
+    fi
+  fi
+
+  # Fetch from API if cache is stale
+  if [ "$need_fetch" -eq 1 ]; then
+    api_resp=$(curl -s --max-time 5 \
+      -H "Authorization: Bearer ${usage_token}" \
+      -H "anthropic-beta: oauth-2025-04-20" \
+      "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
+    if [ -n "$api_resp" ]; then
+      five_util=$(echo "$api_resp" | jq -r '.five_hour.utilization // empty' 2>/dev/null)
+      five_reset=$(echo "$api_resp" | jq -r '.five_hour.resets_at // empty' 2>/dev/null)
+      if [ -n "$five_util" ]; then
+        usage_pct=$(printf "%.0f" "$five_util")
+        usage_reset="$five_reset"
+        now_ts=$(date +%s)
+        printf '{"timestamp":%d,"five_hour":%s,"five_hour_reset":"%s"}\n' \
+          "$now_ts" "$usage_pct" "$usage_reset" > "$USAGE_CACHE"
+      fi
+    fi
+  fi
+
+  # Render bar if we have data
+  if [ -n "$usage_pct" ]; then
+    if [ "$usage_pct" -ge 90 ]; then
+      bar_fg="$FG_PINK"
+    elif [ "$usage_pct" -ge 75 ]; then
+      bar_fg="$FG_YELLOW"
+    else
+      bar_fg="$FG_BLUE"
+    fi
+
+    # Build 10-char bar: ▪▪▪·······
+    filled=$(( usage_pct * 10 / 100 ))
+    empty=$(( 10 - filled ))
+    bar=""
+    i=0; while [ "$i" -lt "$filled" ]; do bar="${bar}▪"; i=$((i+1)); done
+    i=0; while [ "$i" -lt "$empty" ];  do bar="${bar}·"; i=$((i+1)); done
+
+    # Format reset time as relative (e.g., "1h 30m / 5h")
+    reset_str=""
+    if [ -n "$usage_reset" ]; then
+      reset_epoch=$(date -jf "%Y-%m-%dT%H:%M:%S" "${usage_reset%%.*}" +%s 2>/dev/null)
+      if [ -z "$reset_epoch" ]; then
+        reset_epoch=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "${usage_reset%%.*}Z" +%s 2>/dev/null)
+      fi
+      if [ -n "$reset_epoch" ]; then
+        now_ts=$(date +%s)
+        remain=$(( reset_epoch - now_ts ))
+        if [ "$remain" -gt 0 ]; then
+          rh=$(( remain / 3600 ))
+          rm=$(( (remain % 3600) / 60 ))
+          if [ "$rh" -gt 0 ]; then
+            reset_str=" (${rh}h ${rm}m / 5h)"
+          else
+            reset_str=" (${rm}m / 5h)"
+          fi
+        fi
+      fi
+    fi
+
+    printf "${bar_fg}◔ ${bar} ${usage_pct}%%${reset_str}${RESET}"
+  fi
 fi

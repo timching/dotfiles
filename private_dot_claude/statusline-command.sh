@@ -153,90 +153,60 @@ if [ -n "$duration_str" ] || [ -n "$session_id" ]; then
   printf "${RESET}${SEP}"
 fi
 
-# --- USAGE QUOTA segment (Pro/Max only, cached 5min) ---
-USAGE_CACHE="$HOME/.claude/.usage-cache.json"
-USAGE_TTL=300  # 5 minutes
+# --- RATE LIMITS segment (Pro/Max only, native from Claude Code JSON) ---
+FIVE_H_PCT=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
+FIVE_H_RESET=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
+SEVEN_D_PCT=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+SEVEN_D_RESET=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
 
-# Try to get OAuth token from macOS Keychain
-usage_token=""
-usage_pct=""
-usage_reset=""
-keychain_json=$(/usr/bin/security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null)
-if [ -n "$keychain_json" ]; then
-  usage_token=$(echo "$keychain_json" | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null)
+# Helper: render a single rate-limit bar
+# Usage: render_rate_bar "5h" <pct> <reset_epoch>
+render_rate_bar() {
+  local label="$1" pct_raw="$2" reset_epoch="$3"
+  local pct=$(printf "%.0f" "$pct_raw")
+
+  # Color thresholds
+  local bar_fg
+  if [ "$pct" -ge 90 ]; then bar_fg="$FG_PINK"
+  elif [ "$pct" -ge 75 ]; then bar_fg="$FG_YELLOW"
+  else bar_fg="$FG_BLUE"
+  fi
+
+  # Build 10-char bar: ▪▪▪·······
+  local filled=$(( pct * 10 / 100 ))
+  local empty=$(( 10 - filled ))
+  local bar="" i=0
+  while [ "$i" -lt "$filled" ]; do bar="${bar}▪"; i=$((i+1)); done
+  i=0
+  while [ "$i" -lt "$empty" ];  do bar="${bar}·"; i=$((i+1)); done
+
+  # Format reset time as relative + absolute local time
+  local reset_str=""
+  if [ -n "$reset_epoch" ]; then
+    local now_ts=$(date +%s)
+    local remain=$(( reset_epoch - now_ts ))
+    local reset_clock=$(date -jf "%s" "$reset_epoch" "+%-I:%M%p %Z" 2>/dev/null | sed 's/AM/am/;s/PM/pm/')
+    if [ "$remain" -gt 0 ]; then
+      local rd=$(( remain / 86400 ))
+      local rh=$(( (remain % 86400) / 3600 ))
+      local rm=$(( (remain % 3600) / 60 ))
+      if [ "$rd" -gt 0 ]; then
+        reset_str=" (${rd}d ${rh}h · resets ${reset_clock})"
+      elif [ "$rh" -gt 0 ]; then
+        reset_str=" (${rh}h ${rm}m · resets ${reset_clock})"
+      else
+        reset_str=" (${rm}m · resets ${reset_clock})"
+      fi
+    fi
+  fi
+
+  printf "${bar_fg}◔ ${label} ${bar} ${pct}%%${reset_str}${RESET}"
+}
+
+if [ -n "$FIVE_H_PCT" ]; then
+  render_rate_bar "5h" "$FIVE_H_PCT" "$FIVE_H_RESET"
 fi
-
-if [ -n "$usage_token" ]; then
-  # Check cache freshness
-  need_fetch=1
-  if [ -f "$USAGE_CACHE" ]; then
-    cache_ts=$(jq -r '.timestamp // 0' "$USAGE_CACHE" 2>/dev/null)
-    now_ts=$(date +%s)
-    age=$(( now_ts - cache_ts ))
-    if [ "$age" -lt "$USAGE_TTL" ]; then
-      need_fetch=0
-      usage_pct=$(jq -r '.five_hour // empty' "$USAGE_CACHE" 2>/dev/null)
-      usage_reset=$(jq -r '.five_hour_reset // empty' "$USAGE_CACHE" 2>/dev/null)
-    fi
-  fi
-
-  # Fetch from API if cache is stale
-  if [ "$need_fetch" -eq 1 ]; then
-    api_resp=$(curl -s --max-time 5 \
-      -H "Authorization: Bearer ${usage_token}" \
-      -H "anthropic-beta: oauth-2025-04-20" \
-      "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-    if [ -n "$api_resp" ]; then
-      five_util=$(echo "$api_resp" | jq -r '.five_hour.utilization // empty' 2>/dev/null)
-      five_reset=$(echo "$api_resp" | jq -r '.five_hour.resets_at // empty' 2>/dev/null)
-      if [ -n "$five_util" ]; then
-        usage_pct=$(printf "%.0f" "$five_util")
-        usage_reset="$five_reset"
-        now_ts=$(date +%s)
-        printf '{"timestamp":%d,"five_hour":%s,"five_hour_reset":"%s"}\n' \
-          "$now_ts" "$usage_pct" "$usage_reset" > "$USAGE_CACHE"
-      fi
-    fi
-  fi
-
-  # Render bar if we have data
-  if [ -n "$usage_pct" ]; then
-    if [ "$usage_pct" -ge 90 ]; then
-      bar_fg="$FG_PINK"
-    elif [ "$usage_pct" -ge 75 ]; then
-      bar_fg="$FG_YELLOW"
-    else
-      bar_fg="$FG_BLUE"
-    fi
-
-    # Build 10-char bar: ▪▪▪·······
-    filled=$(( usage_pct * 10 / 100 ))
-    empty=$(( 10 - filled ))
-    bar=""
-    i=0; while [ "$i" -lt "$filled" ]; do bar="${bar}▪"; i=$((i+1)); done
-    i=0; while [ "$i" -lt "$empty" ];  do bar="${bar}·"; i=$((i+1)); done
-
-    # Format reset time as relative + absolute local time
-    reset_str=""
-    if [ -n "$usage_reset" ]; then
-      reset_epoch=$(TZ=UTC date -jf "%Y-%m-%dT%H:%M:%S" "${usage_reset%%.*}" +%s 2>/dev/null)
-      if [ -n "$reset_epoch" ]; then
-        now_ts=$(date +%s)
-        remain=$(( reset_epoch - now_ts ))
-        # Absolute reset time in local timezone (e.g., "4:05pm HKT")
-        reset_clock=$(date -jf "%s" "$reset_epoch" "+%-I:%M%p %Z" 2>/dev/null | sed 's/AM/am/;s/PM/pm/')
-        if [ "$remain" -gt 0 ]; then
-          rh=$(( remain / 3600 ))
-          rm=$(( (remain % 3600) / 60 ))
-          if [ "$rh" -gt 0 ]; then
-            reset_str=" (${rh}h ${rm}m · resets ${reset_clock})"
-          else
-            reset_str=" (${rm}m · resets ${reset_clock})"
-          fi
-        fi
-      fi
-    fi
-
-    printf "${bar_fg}◔ ${bar} ${usage_pct}%%${reset_str}${RESET}"
-  fi
+if [ -n "$SEVEN_D_PCT" ]; then
+  [ -n "$FIVE_H_PCT" ] && printf "${SEP}"
+  render_rate_bar "7d" "$SEVEN_D_PCT" "$SEVEN_D_RESET"
 fi

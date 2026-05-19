@@ -1,0 +1,14 @@
+# zsh aliases — tracked in dotfiles (chezmoi: dot_zsh_aliases)
+# Add new aliases here; `chezmoi add ~/.zsh_aliases` syncs them.
+
+alias rcp='rclone copy -P'
+
+alias tm='tmux'
+alias lzgit='lazygit'
+alias lzclaude='lazyclaude'
+
+alias claudeh='claude --model haiku'
+alias claudes='claude --model sonnet'
+
+alias awake='caffeinate'
+alias cccc='bunx ccusage monthly'

@@ -1,0 +1,17 @@
+{{- $files := list
+    ".gitconfig"
+    ".tmux.conf"
+    ".vimrc"
+    ".zsh_aliases"
+    ".claude/commands/update-dotfiles.md"
+    ".claude/statusline-command.sh"
+    ".config/home-manager/home.nix"
+    "README.md"
+    "bootstrap.sh"
+-}}
+{{ range $path := $files }}
+{{- $source := joinPath $.chezmoi.workingTree $path }}
+[{{ $path | quote }}]
+type = "file"
+url = {{ urlJoin (dict "scheme" "file" "path" $source) | quote }}
+{{ end -}}

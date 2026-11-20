@@ -84,9 +84,15 @@ chsh -s $(which zsh)
 
 ## Day-to-day usage
 
-Edit a dotfile at its home-relative path in this repo. For example, `.vimrc`
-holds the Vim settings and `dot_vimrc.tmpl` contains `{{ include ".vimrc" -}}`.
-Use the same pattern for each new file you want chezmoi to install.
+Edit dotfiles at their home-relative paths in this repo, such as `.vimrc` or
+`.claude/statusline-command.sh`. To manage another file, save it here and add
+its path to the [chezmoi file list](chezmoi/.chezmoiexternal.toml.tmpl).
+Use `chezmoi diff ~/.vimrc` to preview a Vim change and `chezmoi apply ~/.vimrc`
+to install it.
+
+`.chezmoiroot` points chezmoi to the `chezmoi/` directory for its installation
+rules. The two `private_` directories there keep `~/.claude` and `~/.config`
+at mode `0700`.
 
 If you edited the home copy, copy it back to the matching path in this repo
 before committing, e.g. `cp ~/.vimrc ~/.local/share/chezmoi/.vimrc`.

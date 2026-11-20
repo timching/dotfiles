@@ -84,10 +84,14 @@ chsh -s $(which zsh)
 
 ## Day-to-day usage
 
-```bash
-# Add/update a dotfile
-chezmoi add <file-path>
+Edit a dotfile at its home-relative path in this repo. For example, `.vimrc`
+holds the Vim settings and `dot_vimrc.tmpl` contains `{{ include ".vimrc" -}}`.
+Use the same pattern for each new file you want chezmoi to install.
 
+If you edited the home copy, copy it back to the matching path in this repo
+before committing, e.g. `cp ~/.vimrc ~/.local/share/chezmoi/.vimrc`.
+
+```bash
 # See what would change
 chezmoi diff
 

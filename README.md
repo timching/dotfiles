@@ -82,6 +82,13 @@ chsh -s $(which zsh)
 # Then run the quick start steps above
 ```
 
+## Codex status line
+
+The [Codex status-line backup](.codex/statusline.toml) stores the item order and color preference.
+To restore it, merge its two keys into the `[tui]` table in `~/.codex/config.toml`.
+If the table is missing, add the whole snippet. After changing the status line in
+Codex, copy those two settings back into the backup.
+
 ## Day-to-day usage
 
 Edit dotfiles at their home-relative paths in this repo, such as `.vimrc` or
